@@ -196,7 +196,25 @@ REQ=$(call_api '[{"role":"user","content":"hi"}]')
 json_field "$REQ" 'assert d["effort"] == "xhigh" and d["thinking"]["type"] == "adaptive" and "budget_tokens" not in d["thinking"]' \
   && pass "PR-19" "anthropic: Opus 4.7 uses effort + adaptive thinking, not budget_tokens" \
   || fail "PR-19" "anthropic effort/adaptive" "request: $REQ"
-unset -f curl
+
+# AGENT_ENDPOINT overrides the provider base URL; /v1/messages or /v1/responses appended.
+curl(){ while [ $# -gt 0 ]; do u=$1; shift; done; printf '%s' "$u"; }
+PROVIDER=anthropic; MODEL=claude-opus-4-7; MAX_TOKENS=123; THINKING=; EFFORT=medium; EFFORT_OK=1; AGENT_ENDPOINT=http://localhost:9999
+URL=$(call_api '[]')
+[ "$URL" = "http://localhost:9999/v1/messages" ] \
+  && pass "EP-1" "anthropic: AGENT_ENDPOINT base with /v1/messages appended" \
+  || fail "EP-1" "anthropic endpoint override" "url=$URL"
+PROVIDER=openai; MODEL=gpt-5.5; AGENT_ENDPOINT=http://localhost:9999/
+URL=$(call_api '[]')
+[ "$URL" = "http://localhost:9999/v1/responses" ] \
+  && pass "EP-2" "openai: AGENT_ENDPOINT base with /v1/responses, trailing slash stripped" \
+  || fail "EP-2" "openai endpoint override" "url=$URL"
+PROVIDER=anthropic; MODEL=claude-opus-4-7; AGENT_ENDPOINT=
+URL=$(call_api '[]')
+[ "$URL" = "https://api.anthropic.com/v1/messages" ] \
+  && pass "EP-3" "default endpoint used when AGENT_ENDPOINT empty" \
+  || fail "EP-3" "anthropic default endpoint" "url=$URL"
+unset AGENT_ENDPOINT; unset -f curl
 PROVIDER=anthropic
 
 mkdir -p "$TMPD/home" "$TMPD/bin"
@@ -213,7 +231,7 @@ OUT=$(HOME="$TMPD/home" PATH="$TMPD/bin:$PATH" AGENT_MODEL=gpt-5.5 "$AGENT" -n h
   || fail "PR-20" "saved key/env parser" "rc=$RC out=$OUT pwn=$([ -e "$TMPD/pwn" ] && echo yes || echo no)"
 
 mkdir -p "$TMPD/emptyhome"; HOME="$TMPD/emptyhome"
-printf '2\n export OPENAI_API_KEY="saved-key" \n\nnone\nY\n' | _setup 2>/dev/null
+printf '2\n export OPENAI_API_KEY="saved-key" \n\nnone\n\nY\n' | _setup 2>/dev/null
 . "$TMPD/emptyhome/.pu.env"
 [ "$OPENAI_API_KEY" = saved-key ] && [ "$(_clean_key ' OPENAI_API_KEY="saved-key" ')" = saved-key ] \
   && pass "PR-21" "login strips env/export-prefix/quotes/whitespace from pasted key" \
@@ -222,6 +240,29 @@ HIST="$TMPD/hist.json"; HOME="$TMPD/home" PATH="$TMPD/bin:$PATH" AGENT_MODEL=gpt
 json_field "$(cat "$HIST")" 'assert d[-1]["role"] == "assistant" and d[-1]["content"] == "ok"' \
   && pass "PR-22" "final assistant response is saved to history" \
   || fail "PR-22" "assistant response missing from history" "hist=$(cat "$HIST")"
+
+# AGENT_ENDPOINT is allowlisted by the ~/.pu.env loader.
+mkdir -p "$TMPD/endhome"; printf "AGENT_ENDPOINT='http://internal:8080/'\n" > "$TMPD/endhome/.pu.env"
+AGENT_ENDPOINT=; HOME="$TMPD/endhome" _load_env
+[ "$AGENT_ENDPOINT" = "http://internal:8080/" ] \
+  && pass "EP-4" "_load_env allowlists AGENT_ENDPOINT from ~/.pu.env" \
+  || fail "EP-4" ".pu.env endpoint load" "got=$AGENT_ENDPOINT"
+unset AGENT_ENDPOINT
+
+# /login persists an entered endpoint (trailing slash stripped) to ~/.pu.env.
+mkdir -p "$TMPD/endsetup"; HOME="$TMPD/endsetup"
+printf '2\n export OPENAI_API_KEY="saved-key" \n\nlow\nhttp://custom:7000/\nY\n' | _setup 2>/dev/null
+. "$TMPD/endsetup/.pu.env"
+[ "${AGENT_ENDPOINT:-}" = "http://custom:7000" ] \
+  && pass "EP-5" "/login persists AGENT_ENDPOINT to ~/.pu.env (trailing slash stripped)" \
+  || fail "EP-5" "/login endpoint save" "endpoint=$AGENT_ENDPOINT"
+
+# /endpoint <url> sets AGENT_ENDPOINT in-session, stripping a trailing slash.
+AGENT_ENDPOINT=; handle_cmd '/endpoint http://gateway:9000/' >/dev/null 2>/dev/null
+[ "$AGENT_ENDPOINT" = "http://gateway:9000" ] \
+  && pass "EP-6" "/endpoint sets AGENT_ENDPOINT in-session" \
+  || fail "EP-6" "/endpoint setter" "AGENT_ENDPOINT=$AGENT_ENDPOINT"
+unset AGENT_ENDPOINT
 
 # ── trim_context end-to-end (mocked call_api) ──────────────────────
 echo

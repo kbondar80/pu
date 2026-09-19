@@ -37,7 +37,7 @@ The most important idea: the LLM does not directly run commands. It asks for nam
 | `.pu-history.json` | Current conversation transcript, reused across turns. |
 | `.pu-history.json.meta` | Provider/model metadata for the history file. |
 | `.pu-events.jsonl` | Append-only event log for replay, debugging, and export. |
-| `~/.pu.env` | Optional saved API key/provider/model/effort/reasoning configuration. |
+| `~/.pu.env` | Optional saved API key/provider/model/effort/reasoning/endpoint configuration. |
 
 ## Running a task
 
@@ -58,6 +58,8 @@ The script then:
 7. If the model requested a tool, runs it through `run_tool`.
 8. Appends the tool result back into the conversation.
 9. Repeats until the model returns final assistant text.
+
+The provider endpoint defaults to the official API, but setting `AGENT_ENDPOINT` overrides the base URL (`/v1/messages` or `/v1/responses` is appended). Use `/endpoint <url>` to change it in-session or `/login` to persist it.
 
 ## Provider translation layer
 
@@ -220,6 +222,7 @@ Inside interactive mode:
 /session
 /model model-id
 /effort xhigh
+/endpoint http://localhost:8080
 /reasoning auto
 /flush
 /compact focus text

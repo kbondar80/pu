@@ -74,6 +74,8 @@ Keeping `reasoning` with its `function_call` matters. OpenAI can reject a transc
 
 When supported, OpenAI can also return public reasoning summaries. `AGENT_REASONING_SUMMARY` defaults to `auto`, and `/reasoning` changes it interactively.
 
+The provider base URL is configurable. Set `AGENT_ENDPOINT` to a custom base URL (for example a local proxy or an OpenAI-compatible gateway); `/v1/messages` (Anthropic) or `/v1/responses` (OpenAI) is appended automatically and a trailing slash is stripped. `/endpoint <url>` changes it in-session, and `/login` can persist it to `~/.pu.env`.
+
 ## Tools
 
 The model can call seven tools:

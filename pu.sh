@@ -23,7 +23,7 @@ s/'\''$//'|tr -d '[:space:]'
 _load_env(){ [ -f "$HOME/.pu.env" ]||return;while IFS='=' read -r k v;do k=$(printf '%s' "$k"|sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^export[[:space:]]*//')
 v=$(_clean_key "$v");case "$k" in OPENAI_API_KEY)[ -z "${OPENAI_API_KEY:-}" ]&&OPENAI_API_KEY=$v;; ANTHROPIC_API_KEY)[ -z "${ANTHROPIC_API_KEY:-}" ]&&ANTHROPIC_API_KEY=$v;;
 AGENT_PROVIDER)[ -z "${AGENT_PROVIDER:-}" ]&&AGENT_PROVIDER=$v;; AGENT_MODEL)[ -z "${AGENT_MODEL:-}" ]&&AGENT_MODEL=$v;; AGENT_EFFORT)[ -z "${AGENT_EFFORT:-}" ]&&AGENT_EFFORT=$v;;
-AGENT_REASONING_SUMMARY)[ -z "${AGENT_REASONING_SUMMARY:-}" ]&&AGENT_REASONING_SUMMARY=$v;esac
+AGENT_REASONING_SUMMARY)[ -z "${AGENT_REASONING_SUMMARY:-}" ]&&AGENT_REASONING_SUMMARY=$v;; AGENT_ENDPOINT)[ -z "${AGENT_ENDPOINT:-}" ]&&AGENT_ENDPOINT=$v;esac
 done <"$HOME/.pu.env";}
 _load_env;[ -n "${OPENAI_API_KEY:-}" ]&&OPENAI_API_KEY=$(_clean_key "$OPENAI_API_KEY");[ -n "${ANTHROPIC_API_KEY:-}" ]&&ANTHROPIC_API_KEY=$(_clean_key "$ANTHROPIC_API_KEY")
 if [ -n "${AGENT_PROVIDER:-}" ];then PROVIDER=$AGENT_PROVIDER;else case "${AGENT_MODEL:-}" in gpt-*|o1*|o3*|o4*)PROVIDER=openai;; claude-*)PROVIDER=anthropic;;
@@ -44,7 +44,7 @@ Current date: $(date +%Y-%m-%d)
 Current working directory: $(pwd)
 Your source code is at $(cd "$(dirname "$0")"&&pwd)/$(basename "$0"). Use read to inspect it if asked about your capabilities/configuration.}"
 while [ $# -gt 0 ];do
-case "$1" in -h|--help)printf '%s\n' 'pu-unminified.sh — readable educational build of pu.sh (sh+curl, no deps)' 'Usage: ./pu-unminified.sh "task" | ./pu-unminified.sh (interactive) | --pipe | --cost | -v' 'Env: ANTHROPIC_API_KEY OPENAI_API_KEY AGENT_MODEL AGENT_PROVIDER AGENT_SYSTEM AGENT_MAX_STEPS AGENT_MAX_TOKENS AGENT_LOG AGENT_CONFIRM AGENT_VERBOSE AGENT_REASONING_SUMMARY AGENT_CONTEXT_LIMIT AGENT_RESERVE AGENT_TOOL_TRUNC AGENT_READ_MAX AGENT_LOG_TRUNC AGENT_HISTORY AGENT_THINKING/AGENT_EFFORT AGENT_PRICE_* ~/.pu.env' '7 tools, multi-turn, retries, JSONL logging, pipe mode, !command; auto-compaction summarizes older turns; /compact [focus] runs it manually.'
+case "$1" in -h|--help)printf '%s\n' 'pu-unminified.sh — readable educational build of pu.sh (sh+curl, no deps)' 'Usage: ./pu-unminified.sh "task" | ./pu-unminified.sh (interactive) | --pipe | --cost | -v' 'Env: ANTHROPIC_API_KEY OPENAI_API_KEY AGENT_MODEL AGENT_PROVIDER AGENT_ENDPOINT AGENT_SYSTEM AGENT_MAX_STEPS AGENT_MAX_TOKENS AGENT_LOG AGENT_CONFIRM AGENT_VERBOSE AGENT_REASONING_SUMMARY AGENT_CONTEXT_LIMIT AGENT_RESERVE AGENT_TOOL_TRUNC AGENT_READ_MAX AGENT_LOG_TRUNC AGENT_HISTORY AGENT_THINKING/AGENT_EFFORT AGENT_PRICE_* ~/.pu.env' '7 tools, multi-turn, retries, JSONL logging, pipe mode, !command; auto-compaction summarizes older turns; /compact [focus] runs it manually.'
 exit 0;; -v|--version)echo "${0##*/} 0.1.0";exit 0;; --pipe|-p)PIPE=1;shift;; --cost)COST=1;shift;; -i)INTERACTIVE=1;shift;; -n|--no-interactive)INTERACTIVE=-1;shift;; *)break;esac
 done;for _dep in curl awk;do command -v $_dep >/dev/null 2>&1||{ printf '\033[31m[!] %s not found\033[0m\n' "$_dep" >&2;exit 1;}
 done;RUNSH=$(command -v bash 2>/dev/null||echo sh)
@@ -176,23 +176,30 @@ case "$PROVIDER:$MODEL" in anthropic:claude-opus-4-7*|anthropic:claude-opus-4-6*
 *)case "$THINKING" in low)echo ',"thinking":{"type":"enabled","budget_tokens":1024}';; medium)echo ',"thinking":{"type":"enabled","budget_tokens":4096}';;
 high|xhigh|max)echo ',"thinking":{"type":"enabled","budget_tokens":10000}';; *)echo '';esac
 esac;}
-call_api(){ local sys_esc;sys_esc=$(json_escape "$SYSTEM");local tp mt=$MAX_TOKENS eb="${THINKING:-}";tp=$(think_param);[ "$EFFORT_OK" = 1 ]&&eb="${eb:-$EFFORT}"
-case "$eb" in minimal|low)[ $mt -lt 4096 ]&&mt=4096;; medium)[ $mt -lt 8192 ]&&mt=8192;; high)[ $mt -lt 16000 ]&&mt=16000;; xhigh|max)[ $mt -lt 32000 ]&&mt=32000;esac
+call_api(){ local sys_esc;sys_esc=$(json_escape "$SYSTEM");local tp mt=$MAX_TOKENS eb="${THINKING:-}" ep="${AGENT_ENDPOINT:-}";[ -n "$ep" ]&&ep=${ep%/};tp=$(think_param)
+[ "$EFFORT_OK" = 1 ]&&eb="${eb:-$EFFORT}";case "$eb" in minimal|low)[ $mt -lt 4096 ]&&mt=4096;; medium)[ $mt -lt 8192 ]&&mt=8192;; high)[ $mt -lt 16000 ]&&mt=16000;;
+xhigh|max)[ $mt -lt 32000 ]&&mt=32000;esac
 case "$PROVIDER" in
 anthropic)curl -sS -m120 \
 -H "x-api-key: ${ANTHROPIC_API_KEY:-}" \
 -H anthropic-version:2023-06-01 \
 -H content-type:application/json \
 -d "{\"model\":\"$MODEL\",\"max_tokens\":$mt,\"system\":\"$sys_esc\",\"tools\":[$TD],\"messages\":$1$tp}" \
-https://api.anthropic.com/v1/messages 2>&1;; openai)local rp='' rs='';case "$REASONING_SUMMARY" in ''|none|off|0|false)rs='';;
-concise|detailed|auto)rs=',"summary":"'$REASONING_SUMMARY'"';; *)rs=',"summary":"auto"';esac
-[ "$EFFORT_OK" = 1 ]&&case "$EFFORT" in ''|none);; *)rp=',"reasoning":{"effort":"'$EFFORT'"'$rs'}';esac
+"${ep:-https://api.anthropic.com}/v1/messages" 2>&1;;
+openai)local rp='' rs=''
+case "$REASONING_SUMMARY" in ''|none|off|0|false)rs='';;
+concise|detailed|auto)rs=',"summary":"'$REASONING_SUMMARY'"';;
+*)rs=',"summary":"auto"'
+esac
+[ "$EFFORT_OK" = 1 ]&&case "$EFFORT" in ''|none);;
+*)rp=',"reasoning":{"effort":"'$EFFORT'"'$rs'}'
+esac
 curl -sS -m120 \
 -H "Authorization: Bearer ${OPENAI_API_KEY:-}" \
 -H content-type:application/json \
 -d "{\"model\":\"$MODEL\",\"max_output_tokens\":$mt$rp,\"instructions\":\"$sys_esc\",\"input\":$1,\"tools\":[$RF]}" \
-https://api.openai.com/v1/responses 2>&1;esac
-}
+"${ep:-https://api.openai.com}/v1/responses" 2>&1
+esac;}
 parse_response(){ local resp="$1";TY= TN= TI= TX= TS= CB= TINP= TC=;if [ "$PROVIDER" = anthropic ];then local tu;tu=$(jb "$resp" "tool_use");if [ -n "$tu" ];then TY=T
 TN=$(jp "$tu" name);TI=$(jp "$tu" id);TINP=$(jp "$tu" input);local tt;tt=$(jb "$resp" "text");TX=$(jp "$tt" text);CB=$(jp "$resp" content);else TY=X;local tt
 tt=$(jb "$resp" "text");TX=$(jp "$tt" text);fi
@@ -437,7 +444,7 @@ err "No API key. Set ANTHROPIC_API_KEY or OPENAI_API_KEY (https://console.anthro
 _set_provider_model(){ PROVIDER="$1";MODEL="$2";EFFORT_OK=0;case "$PROVIDER:$MODEL" in openai:gpt-5.5*)[ -z "${AGENT_CONTEXT_LIMIT:-}" ]&&CTX_LIMIT=400000;EFFORT_OK=1;;
 anthropic:claude-opus-4-7*)[ -z "${AGENT_CONTEXT_LIMIT:-}" ]&&CTX_LIMIT=272000;EFFORT_OK=1;;
 anthropic:claude-opus-4-6*|anthropic:claude-sonnet-4-6*|anthropic:claude-opus-4-5*)EFFORT_OK=1;esac;}
-_setup(){ local p k m e s u km dm os;printf '\nWelcome to pu-unminified.sh.\n\nProvider:\n  1) Anthropic (Claude)\n  2) OpenAI (GPT)\n> ' >&2;read -r p
+_setup(){ local p k m e s u km dm os ep;printf '\nWelcome to pu-unminified.sh.\n\nProvider:\n  1) Anthropic (Claude)\n  2) OpenAI (GPT)\n> ' >&2;read -r p
 case "$p" in 2|openai|OpenAI)PROVIDER=openai;km=OPENAI_API_KEY;u=https://platform.openai.com/api-keys;dm=gpt-5.5;; *)PROVIDER=anthropic;km=ANTHROPIC_API_KEY
 u=https://console.anthropic.com/settings/keys;dm=claude-opus-4-7;esac
 command -v open >/dev/null 2>&1&&open "$u" 2>/dev/null||command -v xdg-open >/dev/null 2>&1&&xdg-open "$u" 2>/dev/null||true
@@ -446,10 +453,11 @@ printf 'Get a key at %s\nPaste API key (hidden): ' "$u" >&2;os=$(stty -g 2>/dev/
 printf 'Model [%s]: ' "$dm" >&2;read -r m;[ -z "$m" ]&&m=$dm;_set_provider_model "$PROVIDER" "$m"
 printf 'Effort [medium] (OpenAI: none/minimal/low/medium/high/xhigh; Claude: low/medium/high/max, xhigh on Opus 4.7): ' >&2;read -r e;[ -z "$e" ]&&e=medium;case "$e" in n)e=none;;
 min)e=minimal;; l)e=low;; m)e=medium;; h)e=high;; x|xh)e=xhigh;esac
-EFFORT=$e;export "$km=$k" AGENT_PROVIDER="$PROVIDER" AGENT_MODEL="$MODEL" AGENT_EFFORT="$EFFORT";printf 'Save to ~/.pu.env so next time is automatic? [Y/n] ' >&2;read -r s
-case "$s" in n|N|no|NO)info "Not saved (set in this session only)";; *)(umask 077
-printf '%s=%s\nAGENT_PROVIDER=%s\nAGENT_MODEL=%s\nAGENT_EFFORT=%s\nAGENT_REASONING_SUMMARY=%s\n' "$km" "$(_sq "$k")" "$(_sq "$PROVIDER")" "$(_sq "$MODEL")" "$(_sq "$EFFORT")" "$(_sq "$REASONING_SUMMARY")" >"$HOME/.pu.env")&&info "Saved ~/.pu.env"
-esac
+EFFORT=$e;ep=${AGENT_ENDPOINT:-};printf 'Custom API endpoint base URL, blank for default [%s]: ' "$ep" >&2;read -r ep1;[ -n "$ep1" ]&&ep=${ep1%/}
+export "$km=$k" AGENT_PROVIDER="$PROVIDER" AGENT_MODEL="$MODEL" AGENT_EFFORT="$EFFORT";[ -n "$ep" ]&&export AGENT_ENDPOINT="$ep"||unset AGENT_ENDPOINT
+printf 'Save to ~/.pu.env so next time is automatic? [Y/n] ' >&2;read -r s;case "$s" in n|N|no|NO)info "Not saved (set in this session only)";; *)(umask 077
+printf '%s=%s\nAGENT_PROVIDER=%s\nAGENT_MODEL=%s\nAGENT_EFFORT=%s\nAGENT_REASONING_SUMMARY=%s\n' "$km" "$(_sq "$k")" "$(_sq "$PROVIDER")" "$(_sq "$MODEL")" "$(_sq "$EFFORT")" "$(_sq "$REASONING_SUMMARY")" >"$HOME/.pu.env"
+[ -n "$ep" ]&&printf 'AGENT_ENDPOINT=%s\n' "$(_sq "$ep")" >>"$HOME/.pu.env")&&info "Saved ~/.pu.env";esac
 }
 handle_cmd(){ case "$1" in /model|/model\ *)local nm;nm=$(printf '%s' "$1"|sed 's|^/model *||');[ -n "$nm" ]&&{ case "$nm" in gpt-*|o1*|o3*|o4*)_set_provider_model openai "$nm";;
 claude-*)_set_provider_model anthropic "$nm";; *)MODEL="$nm";esac
@@ -459,7 +467,9 @@ EFFORT=$ef;}
 info "Effort: $EFFORT";return 0;; /reasoning|/reasoning\ *)local rs;rs=$(printf '%s' "$1"|sed 's|^/reasoning *||');[ -n "$rs" ]&&{
 case "$rs" in off|none|0|false)rs=off;;c)rs=concise;;d)rs=detailed;;a)rs=auto;esac
 case "$rs" in off|concise|detailed|auto)REASONING_SUMMARY=$rs;;*)err "Usage: /reasoning [auto|concise|detailed|off]";return 0;esac
-};info "Reasoning summaries: $REASONING_SUMMARY";return 0;; /flush)MSGS="";[ -n "$HISTORY" ]&&{ _mkparent "$HISTORY";printf '[]' >"$HISTORY";rm -f "$HISTORY.meta";}
+};info "Reasoning summaries: $REASONING_SUMMARY";return 0;; /endpoint|/endpoint\ *)local ep;ep=$(printf '%s' "$1"|sed 's|^/endpoint *||');[ -n "$ep" ]&&{ AGENT_ENDPOINT=${ep%/}
+info "Endpoint: $AGENT_ENDPOINT";}||{ [ -n "${AGENT_ENDPOINT:-}" ]&&info "Endpoint: $AGENT_ENDPOINT"||info "Endpoint: default (provider API)";}
+return 0;; /flush)MSGS="";[ -n "$HISTORY" ]&&{ _mkparent "$HISTORY";printf '[]' >"$HISTORY";rm -f "$HISTORY.meta";}
 [ -n "$LOG" ]&&{ _mkparent "$LOG";: >"$LOG";}
 info "Flushed conversation memory and event log";return 0;; /quit|/exit)exit 0;; /login)_setup;return 0;;
 /logout)[ -f "$HOME/.pu.env" ]&&rm "$HOME/.pu.env"&&info "Removed ~/.pu.env"||info "No ~/.pu.env to remove";unset ANTHROPIC_API_KEY OPENAI_API_KEY

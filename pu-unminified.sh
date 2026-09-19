@@ -233,6 +233,7 @@ case "$k" in OPENAI_API_KEY) [ -z "${OPENAI_API_KEY:-}" ] && OPENAI_API_KEY=$v;;
  AGENT_MODEL) [ -z "${AGENT_MODEL:-}" ] && AGENT_MODEL=$v;;
  AGENT_EFFORT) [ -z "${AGENT_EFFORT:-}" ] && AGENT_EFFORT=$v;;
  AGENT_REASONING_SUMMARY) [ -z "${AGENT_REASONING_SUMMARY:-}" ] && AGENT_REASONING_SUMMARY=$v;;
+ AGENT_ENDPOINT) [ -z "${AGENT_ENDPOINT:-}" ] && AGENT_ENDPOINT=$v;;
  esac;
 done < "$HOME/.pu.env";
 }
@@ -300,7 +301,7 @@ Your source code is at $(cd "$(dirname "$0")" && pwd)/$(basename "$0"). Use read
 
 
 while [ $# -gt 0 ];
-do case "$1" in -h|--help) printf '%s\n' 'pu-unminified.sh — readable educational build of pu.sh (sh+curl, no deps)' 'Usage: ./pu-unminified.sh "task" | ./pu-unminified.sh (interactive) | --pipe | --cost | -v' 'Env: ANTHROPIC_API_KEY OPENAI_API_KEY AGENT_MODEL AGENT_PROVIDER AGENT_SYSTEM AGENT_MAX_STEPS AGENT_MAX_TOKENS AGENT_LOG AGENT_CONFIRM AGENT_VERBOSE AGENT_REASONING_SUMMARY AGENT_CONTEXT_LIMIT AGENT_RESERVE AGENT_TOOL_TRUNC AGENT_READ_MAX AGENT_LOG_TRUNC AGENT_HISTORY AGENT_THINKING/AGENT_EFFORT AGENT_PRICE_* ~/.pu.env' '7 tools, multi-turn, retries, JSONL logging, pipe mode, !command; auto-compaction summarizes older turns; /compact [focus] runs it manually.';
+do case "$1" in -h|--help) printf '%s\n' 'pu-unminified.sh — readable educational build of pu.sh (sh+curl, no deps)' 'Usage: ./pu-unminified.sh "task" | ./pu-unminified.sh (interactive) | --pipe | --cost | -v' 'Env: ANTHROPIC_API_KEY OPENAI_API_KEY AGENT_MODEL AGENT_PROVIDER AGENT_ENDPOINT AGENT_SYSTEM AGENT_MAX_STEPS AGENT_MAX_TOKENS AGENT_LOG AGENT_CONFIRM AGENT_VERBOSE AGENT_REASONING_SUMMARY AGENT_CONTEXT_LIMIT AGENT_RESERVE AGENT_TOOL_TRUNC AGENT_READ_MAX AGENT_LOG_TRUNC AGENT_HISTORY AGENT_THINKING/AGENT_EFFORT AGENT_PRICE_* ~/.pu.env' '7 tools, multi-turn, retries, JSONL logging, pipe mode, !command; auto-compaction summarizes older turns; /compact [focus] runs it manually.';
 exit 0;;
 -v|--version)echo "${0##*/} 0.1.0";
 exit 0;;
@@ -542,7 +543,8 @@ esac;;
 #   payload for the currently selected provider.
 call_api(){ local sys_esc;
 sys_esc=$(json_escape "$SYSTEM");
-local tp mt=$MAX_TOKENS eb="${THINKING:-}";
+local tp mt=$MAX_TOKENS eb="${THINKING:-}" ep="${AGENT_ENDPOINT:-}";
+[ -n "$ep" ] && ep=${ep%/}
 tp=$(think_param)
   [ "$EFFORT_OK" = 1 ] && eb="${eb:-$EFFORT}";
 case "$eb" in minimal|low) [ $mt -lt 4096 ] && mt=4096;;
@@ -556,7 +558,7 @@ case "$eb" in minimal|low) [ $mt -lt 4096 ] && mt=4096;;
     -H anthropic-version:2023-06-01 \
     -H content-type:application/json \
     -d "{\"model\":\"$MODEL\",\"max_tokens\":$mt,\"system\":\"$sys_esc\",\"tools\":[$TD],\"messages\":$1${tp}}" \
-    https://api.anthropic.com/v1/messages 2>&1;;
+    "${ep:-https://api.anthropic.com}/v1/messages" 2>&1;;
 
   openai) local rp='' rs='';
 case "$REASONING_SUMMARY" in ''|none|off|0|false) rs='';;
@@ -570,7 +572,7 @@ case "$REASONING_SUMMARY" in ''|none|off|0|false) rs='';;
     -H "Authorization: Bearer ${OPENAI_API_KEY:-}" \
     -H content-type:application/json \
     -d "{\"model\":\"$MODEL\",\"max_output_tokens\":$mt${rp},\"instructions\":\"$sys_esc\",\"input\":$1,\"tools\":[$RF]}" \
-    https://api.openai.com/v1/responses 2>&1;;
+    "${ep:-https://api.openai.com}/v1/responses" 2>&1;;
 
   esac;
 }
@@ -1435,7 +1437,7 @@ case "$PROVIDER:$MODEL" in openai:gpt-5.5*) [ -z "${AGENT_CONTEXT_LIMIT:-}" ] &&
 }
 
 # Interactive setup: guide a new user through provider and API-key configuration.
-_setup(){ local p k m e s u km dm os
+_setup(){ local p k m e s u km dm os ep
   printf '\nWelcome to pu-unminified.sh.\n\nProvider:\n  1) Anthropic (Claude)\n  2) OpenAI (GPT)\n> ' >&2;
 read -r p
   case "$p" in 2|openai|OpenAI) PROVIDER=openai;
@@ -1473,12 +1475,19 @@ case "$e" in n) e=none;;
  x|xh) e=xhigh;;
  esac;
 EFFORT=$e;
+ep=${AGENT_ENDPOINT:-};
+printf 'Custom API endpoint base URL, blank for default [%s]: ' "$ep" >&2;
+read -r ep1;
+[ -n "$ep1" ] && ep=${ep1%/}
 export "$km=$k" AGENT_PROVIDER="$PROVIDER" AGENT_MODEL="$MODEL" AGENT_EFFORT="$EFFORT"
+[ -n "$ep" ] && export AGENT_ENDPOINT="$ep" || unset AGENT_ENDPOINT
   printf 'Save to ~/.pu.env so next time is automatic? [Y/n] ' >&2;
 read -r s;
 case "$s" in n|N|no|NO) info "Not saved (set in this session only)";;
- *) (umask 077;
-printf '%s=%s\nAGENT_PROVIDER=%s\nAGENT_MODEL=%s\nAGENT_EFFORT=%s\nAGENT_REASONING_SUMMARY=%s\n' "$km" "$(_sq "$k")" "$(_sq "$PROVIDER")" "$(_sq "$MODEL")" "$(_sq "$EFFORT")" "$(_sq "$REASONING_SUMMARY")" > "$HOME/.pu.env") && info "Saved ~/.pu.env";;
+  *) (umask 077;
+printf '%s=%s\nAGENT_PROVIDER=%s\nAGENT_MODEL=%s\nAGENT_EFFORT=%s\nAGENT_REASONING_SUMMARY=%s\n' "$km" "$(_sq "$k")" "$(_sq "$PROVIDER")" "$(_sq "$MODEL")" "$(_sq "$EFFORT")" "$(_sq "$REASONING_SUMMARY")" > "$HOME/.pu.env";
+[ -n "$ep" ] && printf 'AGENT_ENDPOINT=%s\n' "$(_sq "$ep")" >> "$HOME/.pu.env";
+) && info "Saved ~/.pu.env";;
  esac;
 }
 
@@ -1515,6 +1524,14 @@ rs=$(printf '%s' "$1" | sed 's|^/reasoning *||');
 case "$rs" in off|concise|detailed|auto) REASONING_SUMMARY=$rs;; *) err "Usage: /reasoning [auto|concise|detailed|off]"; return 0;; esac;
 };
 info "Reasoning summaries: $REASONING_SUMMARY";
+return 0;;
+
+  /endpoint|/endpoint\ *) local ep;
+ep=$(printf '%s' "$1" | sed 's|^/endpoint *||');
+[ -n "$ep" ] && { AGENT_ENDPOINT=${ep%/};
+info "Endpoint: $AGENT_ENDPOINT";
+} || { [ -n "${AGENT_ENDPOINT:-}" ] && info "Endpoint: $AGENT_ENDPOINT" || info "Endpoint: default (provider API)";
+};
 return 0;;
  /flush) MSGS="";
 [ -n "$HISTORY" ] && { _mkparent "$HISTORY";

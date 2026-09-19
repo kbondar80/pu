@@ -98,7 +98,7 @@ Pi + Node           281 MB            ██████████████
 SWE-agent Docker    1.8 GB            ██████████████████████████████████████████████████████████████...
 ```
 
-*Measured locally on macOS arm64. Current generated `pu.sh` is 49,276 bytes (48.12 KiB) by `wc -c`; the headline stays under 50 KB. Larger tools include their runtime/package footprints as described in [final_report.md](final_report.md).*
+*Measured locally on macOS arm64. Current generated `pu.sh` is 49,975 bytes (48.80 KiB) by `wc -c`; the headline stays under 50 KB. Larger tools include their runtime/package footprints as described in [final_report.md](final_report.md).*
 
 ## Configuration
 
@@ -108,6 +108,7 @@ All env vars. Optional `~/.pu.env` is created by `/login`/first run with `0600`-
 |---|---|---|
 | `AGENT_PROVIDER` | auto from key/model, else `anthropic` | `anthropic` or `openai` |
 | `AGENT_MODEL` | `claude-opus-4-7` or `gpt-5.5` | Model id |
+| `AGENT_ENDPOINT` | provider default (`api.anthropic.com` / `api.openai.com`) | Base URL for the LLM API; `/v1/messages` or `/v1/responses` is appended. Trailing slash is stripped. |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key |
 | `OPENAI_API_KEY` | — | OpenAI API key |
 | `AGENT_EFFORT` | `medium` | `none|minimal|low|medium|high|xhigh|max`; unsupported models omit effort fields |
@@ -135,6 +136,7 @@ All env vars. Optional `~/.pu.env` is created by `/login`/first run with `0600`-
 | `/model [id]` | Show or switch model; guesses provider from `gpt-*`/`o*`/`claude-*` |
 | `/effort [level]` | Show or set reasoning effort (`none`, `low`, `medium`, `high`, `xhigh`, etc.) |
 | `/reasoning [mode]` | Show or set OpenAI reasoning summaries (`auto`, `concise`, `detailed`, `off`) |
+| `/endpoint [url]` | Show or set the custom API base URL; blank restores the provider default |
 | `/login` | Run API-key setup wizard |
 | `/logout` | Remove `~/.pu.env` and unset in-process keys |
 | `/flush` | Reset the session: clear memory/history, remove history metadata, and truncate event log |
@@ -182,7 +184,7 @@ For details, see [How pu works](docs/how-pu-works.md).
 ## Testing
 
 ```sh
-# No API calls, no cost. Current expected result: PASS: 105 FAIL: 0.
+# No API calls, no cost. Current expected result: PASS: 111 FAIL: 0.
 bash eval/test_real.sh
 
 # Shell syntax.
